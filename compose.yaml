@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # 1. MySQL 8.0 (Cơ sở dữ liệu chính)
+  # 1. MySQL 8.0
   mysql:
     image: mysql:8.0
     container_name: flashsale-mysql
@@ -17,8 +15,13 @@ services:
     networks:
       - flashsale_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 2. Redis (Lưu Cache, OTP, JWT Denylist, Tồn kho Flash Sale)
+  # 2. Redis 7
   redis:
     image: redis:7-alpine
     container_name: flashsale-redis
@@ -27,8 +30,13 @@ services:
     networks:
       - flashsale_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 3. Kafka (Message Queue - Chạy chế độ KRaft, no ZooKeeper)
+  # 3. Kafka (KRaft mode, no ZooKeeper)
   kafka:
     image: apache/kafka:3.9.0
     container_name: flashsale-kafka
@@ -39,7 +47,6 @@ services:
       - KAFKA_PROCESS_ROLES=broker,controller
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      # Quan trọng: Lắng nghe ở localhost:9092 để Spring Boot từ bên ngoài host có thể gửi/nhận message
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
@@ -48,15 +55,14 @@ services:
       - flashsale_network
     restart: unless-stopped
 
-  # 4. Kafka UI (Giao diện quản lý trực quan cho Kafka)
+  # 4. Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: flashsale-kafka-ui
     ports:
-      - "8081:8081" # Truy cập UI tại trình duyệt: http://localhost:8081
+      - "8081:8080"
     environment:
       - KAFKA_CLUSTERS_0_NAME=local-kafka
-      # Kết nối tới container kafka thông qua mạng nội bộ của Docker
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
     depends_on:
       - kafka
@@ -64,11 +70,9 @@ services:
       - flashsale_network
     restart: unless-stopped
 
-# Khai báo volume để giữ lại dữ liệu MySQL khi tắt/khởi động lại container
 volumes:
   mysql_data:
 
-# Khai báo bridge network để các container có thể nhìn thấy nhau thông qua container_name
 networks:
   flashsale_network:
     driver: bridge

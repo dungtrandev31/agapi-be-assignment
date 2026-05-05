@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { background: white; font-family: sans-serif; padding: 40px; }
+        .diagram { margin: 40px 0; padding: 20px; }
+        h2 { color: #333; border-bottom: 2px solid #0969da; padding-bottom: 8px; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+</head>
+<body>
+
+<h2>1. System Architecture</h2>
+<div class="diagram">
+<pre class="mermaid">
+graph TD
+    Client["Client (Mobile / Web)"]
+    LB["Load Balancer (Nginx / ALB)"]
+    Pod1["Pod 1 (Spring Boot)"]
+    Pod2["Pod 2 (Spring Boot)"]
+    MySQL["MySQL 8.0 (RW)"]
+    Redis["Redis 7 (Shared)"]
+    Kafka["Kafka 3.9 (Events)"]
+
+    Client -->|HTTPS| LB
+    LB --> Pod1
+    LB --> Pod2
+    Pod1 --> MySQL
+    Pod1 --> Redis
+    Pod1 --> Kafka
+    Pod2 --> MySQL
+    Pod2 --> Redis
+    Pod2 --> Kafka
+</pre>
+</div>
+
+<h2>2. Application Layer Architecture</h2>
+<div class="diagram">
+<pre class="mermaid">
+graph TB
+    subgraph REST["REST Layer - rest/"]
+        AC["AuthController"]
+        FSC["FlashSaleController"]
+        FAC["FlashSaleAdminController"]
+        REQ["request/ - 7 DTOs"]
+        RES["response/ - 2 DTOs"]
+    end
+
+    subgraph APP["Application Layer - application/"]
+        subgraph SVC["Service Interfaces"]
+            AS["AuthService"]
+            OS["OtpService"]
+            FS["FlashSaleService"]
+            FAS["FlashSaleAdminService"]
+        end
+        subgraph IMPL["Service Implementations"]
+            ASI["AuthServiceImpl"]
+            OSI["OtpServiceImpl"]
+            FSI["FlashSaleServiceImpl"]
+            FASI["FlashSaleAdminServiceImpl"]
+        end
+        subgraph DATA["Entity + Repository"]
+            ENT["User, Product, Slot, Item, Order, Event"]
+            REPO["UserRepo, ProductRepo, SlotRepo, ItemRepo, OrderRepo, EventRepo"]
+        end
+        INV["InventorySyncConsumer - Kafka"]
+    end
+
+    subgraph INFRA["Infrastructure Layer - infrastructure/"]
+        CFG["SecurityConfig, RedisConfig, KafkaConfig, OpenApiConfig"]
+        SEC["JwtTokenProvider, JwtAuthFilter, RateLimitFilter"]
+    end
+
+    AC --> AS
+    FSC --> FS
+    FAC --> FAS
+    ASI --> REPO
+    FSI --> REPO
+    FASI --> REPO
+    FSI -->|publish event| INV
+    INFRA -->|MySQL, Redis, Kafka| DATA
+</pre>
+</div>
+
+<h2>3. Purchase Flow</h2>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant RL as RateLimitFilter
+    participant JWT as JwtFilter
+    participant SVC as FlashSaleService
+    participant R as Redis
+    participant DB as MySQL
+    participant K as Kafka
+
+    C->>RL: POST /flash-sales/itemId/purchase
+    RL->>RL: Check IP rate 100 req/min
+    RL->>JWT: Pass through
+    JWT->>JWT: Validate access token
+    JWT->>SVC: Authenticated request userId
+
+    SVC->>DB: existsByUserIdAndSaleDate?
+    DB-->>SVC: false OK
+
+    SVC->>R: DECR flash_sale_stock itemId
+    R-->>SVC: remaining = N
+
+    alt N >= 0
+        SVC->>DB: UPDATE sold_quantity + 1 WHERE sold < max
+        DB-->>SVC: rows = 1 OK
+
+        SVC->>DB: UPDATE balance -= amount WHERE balance >= amount
+        DB-->>SVC: rows = 1 OK
+
+        SVC->>DB: INSERT flash_sale_orders
+        DB-->>SVC: OK
+
+        SVC->>K: SEND STOCK_DEDUCTED event
+        SVC-->>C: 200 orderNo
+    else N < 0
+        SVC->>R: INCR rollback
+        SVC-->>C: 409 SOLD_OUT
+    end
+</pre>
+</div>
+
+<h2>4. ERD - Database Schema</h2>
+<div class="diagram">
+<pre class="mermaid">
+erDiagram
+    users {
+        BIGINT id PK
+        VARCHAR email UK
+        VARCHAR phone UK
+        VARCHAR password_hash
+        DECIMAL balance
+        BOOLEAN email_verified
+        BOOLEAN phone_verified
+        VARCHAR role
+        VARCHAR status
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    otp_verifications {
+        BIGINT id PK
+        VARCHAR identifier
+        VARCHAR otp_code
+        VARCHAR purpose
+        BOOLEAN verified
+        DATETIME expires_at
+        DATETIME created_at
+    }
+
+    products {
+        BIGINT id PK
+        VARCHAR name
+        TEXT description
+        DECIMAL original_price
+        INT total_stock
+        VARCHAR status
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    flash_sale_slots {
+        BIGINT id PK
+        DATE sale_date
+        TIME start_time
+        TIME end_time
+        VARCHAR status
+        DATETIME created_at
+    }
+
+    flash_sale_items {
+        BIGINT id PK
+        BIGINT slot_id
+        BIGINT product_id
+        INT sale_quantity
+        INT sold_quantity
+        DECIMAL flash_price
+        DATETIME created_at
+    }
+
+    flash_sale_orders {
+        BIGINT id PK
+        VARCHAR order_no UK
+        BIGINT user_id
+        BIGINT flash_sale_item_id
+        DATE sale_date
+        DECIMAL amount
+        VARCHAR status
+        DATETIME created_at
+    }
+
+    inventory_events {
+        BIGINT id PK
+        VARCHAR event_id UK
+        VARCHAR event_type
+        BIGINT product_id
+        INT quantity_change
+        VARCHAR status
+        DATETIME created_at
+        DATETIME processed_at
+    }
+
+    users ||--o{ flash_sale_orders : "places"
+    flash_sale_items ||--o{ flash_sale_orders : "purchased in"
+    flash_sale_slots ||--o{ flash_sale_items : "contains"
+    products ||--o{ flash_sale_items : "sold as"
+    products ||--o{ inventory_events : "tracked by"
+</pre>
+</div>
+
+</body>
+</html>

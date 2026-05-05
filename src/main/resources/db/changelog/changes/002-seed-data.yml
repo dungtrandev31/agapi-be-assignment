@@ -1,0 +1,77 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-products
+      author: flashsale
+      changes:
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "iPhone 15 Pro Max 256GB" }
+              - column: { name: description, value: "Apple iPhone 15 Pro Max, chip A17 Pro, camera 48MP, màn hình 6.7 inch Super Retina XDR" }
+              - column: { name: original_price, valueNumeric: 34990000 }
+              - column: { name: total_stock, valueNumeric: 500 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "Samsung Galaxy S24 Ultra 512GB" }
+              - column: { name: description, value: "Samsung Galaxy S24 Ultra, chip Snapdragon 8 Gen 3, camera 200MP, S-Pen tích hợp, màn hình 6.8 inch" }
+              - column: { name: original_price, valueNumeric: 33990000 }
+              - column: { name: total_stock, valueNumeric: 400 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "iPad Pro M4 11 inch 256GB" }
+              - column: { name: description, value: "Apple iPad Pro M4, màn hình Liquid Retina XDR 11 inch, chip M4, hỗ trợ Apple Pencil Pro" }
+              - column: { name: original_price, valueNumeric: 28990000 }
+              - column: { name: total_stock, valueNumeric: 300 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "MacBook Air M3 15 inch 16GB/512GB" }
+              - column: { name: description, value: "Apple MacBook Air M3, màn hình 15.3 inch Liquid Retina, RAM 16GB, SSD 512GB, pin 18 giờ" }
+              - column: { name: original_price, valueNumeric: 38990000 }
+              - column: { name: total_stock, valueNumeric: 200 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "Sony WH-1000XM5" }
+              - column: { name: description, value: "Tai nghe chống ồn Sony WH-1000XM5, Bluetooth 5.3, pin 30 giờ, chống ồn hàng đầu" }
+              - column: { name: original_price, valueNumeric: 8490000 }
+              - column: { name: total_stock, valueNumeric: 1000 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "Samsung Galaxy Tab S9 FE 128GB" }
+              - column: { name: description, value: "Samsung Galaxy Tab S9 FE, màn hình 10.9 inch, chip Exynos 1380, S-Pen đi kèm" }
+              - column: { name: original_price, valueNumeric: 9990000 }
+              - column: { name: total_stock, valueNumeric: 350 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "Xiaomi 14 Ultra 512GB" }
+              - column: { name: description, value: "Xiaomi 14 Ultra, camera Leica 50MP, chip Snapdragon 8 Gen 3, sạc nhanh 90W" }
+              - column: { name: original_price, valueNumeric: 23990000 }
+              - column: { name: total_stock, valueNumeric: 250 }
+        - insert:
+            tableName: products
+            columns:
+              - column: { name: name, value: "Apple Watch Ultra 2" }
+              - column: { name: description, value: "Apple Watch Ultra 2, vỏ Titanium 49mm, GPS + Cellular, pin 36 giờ, chống nước 100m" }
+              - column: { name: original_price, valueNumeric: 21990000 }
+              - column: { name: total_stock, valueNumeric: 150 }
+
+  - changeSet:
+      id: 002-seed-admin-user
+      author: flashsale
+      comment: "Admin user (password: admin123) with BCrypt hash"
+      changes:
+        - insert:
+            tableName: users
+            columns:
+              - column: { name: email, value: "admin@flashsale.com" }
+              - column: { name: password_hash, value: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy" }
+              - column: { name: balance, valueNumeric: 99999999.00 }
+              - column: { name: email_verified, valueBoolean: true }
+              - column: { name: phone_verified, valueBoolean: false }
+              - column: { name: role, value: "ADMIN" }
+              - column: { name: status, value: "ACTIVE" }
