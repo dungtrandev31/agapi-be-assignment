@@ -69,7 +69,7 @@ databaseChangeLog:
             tableName: users
             columns:
               - column: { name: email, value: "admin@flashsale.com" }
-              - column: { name: password_hash, value: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy" }
+              - column: { name: password_hash, value: "$2a$10$UQUexZE.qZXtp0GdBPeODOvzgXW3Z7qOUAa8l1Wpq4hczc9IViMqG" }
               - column: { name: balance, valueNumeric: 99999999.00 }
               - column: { name: email_verified, valueBoolean: true }
               - column: { name: phone_verified, valueBoolean: false }

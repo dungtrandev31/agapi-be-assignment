@@ -1,0 +1,26 @@
+stages:
+  - security_scan
+
+# --- DEMO 1: TRIVY SCAN ---
+trivy_scan:
+  stage: security_scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - echo "Đang quét mã nguồn và Base Image bằng Trivy..."
+    - trivy fs --scanners vuln,secret --exit-code 1 --severity CRITICAL .
+  tags:
+    - docker
+
+# --- DEMO 2: TERRASCAN SCAN ---
+terrascan_scan:
+  stage: security_scan
+  image:
+    name: tenable/terrascan:latest
+    entrypoint: [""]
+  script:
+    - echo "Đang quét cấu hình Kubernetes bằng Terrascan..."
+    - terrascan scan -i k8s -d ./k8s/ --policy-type admission
+  tags:
+    - docker

@@ -9,7 +9,7 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>org.example</groupId>
-    <artifactId>agapi-be-assignment</artifactId>
+    <artifactId>agapi-be</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>agapi-be-assignment</name>
     <description>agapi-be-assignment</description>

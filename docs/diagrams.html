@@ -84,46 +84,85 @@ graph TB
 </pre>
 </div>
 
-<h2>3. Purchase Flow</h2>
+<h2>3. Purchase Flow — Happy Path</h2>
 <div class="diagram">
 <pre class="mermaid">
 sequenceDiagram
     participant C as Client
     participant RL as RateLimitFilter
-    participant JWT as JwtFilter
     participant SVC as FlashSaleService
     participant R as Redis
     participant DB as MySQL
     participant K as Kafka
+    participant INV as InventorySyncConsumer
 
-    C->>RL: POST /flash-sales/itemId/purchase
-    RL->>RL: Check IP rate 100 req/min
-    RL->>JWT: Pass through
-    JWT->>JWT: Validate access token
-    JWT->>SVC: Authenticated request userId
+    C->>RL: POST /flash-sales/{itemId}/purchase
+    RL->>RL: Check IP rate (100 req/min)
 
-    SVC->>DB: existsByUserIdAndSaleDate?
-    DB-->>SVC: false OK
+    rect rgb(235, 248, 235)
+        Note over SVC,DB: @Transactional - Sync (fast ~10ms)
+        SVC->>R: DECR flash_sale_stock:{itemId}
+        R-->>SVC: remaining >= 0
 
-    SVC->>R: DECR flash_sale_stock itemId
-    R-->>SVC: remaining = N
+        SVC->>DB: UPDATE sold_quantity +1 (WHERE sold < max)
+        DB-->>SVC: rows = 1
 
-    alt N >= 0
-        SVC->>DB: UPDATE sold_quantity + 1 WHERE sold < max
-        DB-->>SVC: rows = 1 OK
+        SVC->>DB: UPDATE balance -= amount (WHERE balance >= amount)
+        DB-->>SVC: rows = 1
 
-        SVC->>DB: UPDATE balance -= amount WHERE balance >= amount
-        DB-->>SVC: rows = 1 OK
-
-        SVC->>DB: INSERT flash_sale_orders
+        SVC->>DB: INSERT order (status = PENDING)
         DB-->>SVC: OK
-
-        SVC->>K: SEND STOCK_DEDUCTED event
-        SVC-->>C: 200 orderNo
-    else N < 0
-        SVC->>R: INCR rollback
-        SVC-->>C: 409 SOLD_OUT
     end
+
+    SVC-->>C: 200 {orderNo, status: PENDING}
+    Note over SVC,K: @TransactionalEventListener(AFTER_COMMIT)
+    SVC->>K: STOCK_DEDUCTED event (with saga context)
+
+    rect rgb(230, 245, 255)
+        Note over K,INV: Async - Kafka Consumer (any pod)
+        K->>INV: Consume event
+        INV->>DB: UPDATE totalStock -1 (WHERE stock >= 1)
+        DB-->>INV: rows = 1
+        INV->>DB: UPDATE order status = SUCCESS
+        INV->>DB: INSERT inventory_event (PROCESSED)
+    end
+
+    Note over INV: Saga Complete
+</pre>
+</div>
+
+<h2>3b. Purchase Flow — Compensation (stock hết / lỗi)</h2>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant SVC as FlashSaleService
+    participant R as Redis
+    participant DB as MySQL
+    participant K as Kafka
+    participant INV as InventorySyncConsumer
+
+    C->>SVC: POST /purchase
+    Note over SVC,DB: ... same sync steps ...
+    SVC-->>C: 200 {orderNo, status: PENDING}
+    SVC->>K: STOCK_DEDUCTED event
+
+    rect rgb(255, 235, 235)
+        Note over K,INV: Async - Kafka Consumer
+        K->>INV: Consume event
+        INV->>DB: UPDATE totalStock -1 (WHERE stock >= 1)
+        DB-->>INV: rows = 0 (het stock!)
+
+        Note over INV: Trigger Saga Compensation
+
+        INV->>DB: DELETE order (free unique constraint)
+        INV->>DB: UPDATE balance += amount (restore)
+        INV->>DB: UPDATE sold_quantity -1 (restore)
+        INV->>DB: INSERT inventory_event (COMPENSATED)
+        INV->>R: INCR flash_sale_stock:{itemId} (restore)
+    end
+
+    Note over INV: Saga Compensated - all restored
 </pre>
 </div>
 
