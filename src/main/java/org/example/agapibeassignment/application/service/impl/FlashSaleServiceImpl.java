@@ -3,14 +3,14 @@ package org.example.agapibeassignment.application.service.impl;
 import org.example.agapibeassignment.application.common.exception.BusinessException;
 import org.example.agapibeassignment.application.common.exception.ErrorCode;
 import org.example.agapibeassignment.application.entity.*;
+import org.example.agapibeassignment.application.inventory.InventoryDeductionEvent;
 import org.example.agapibeassignment.application.repository.*;
 import org.example.agapibeassignment.application.service.FlashSaleService;
-import org.example.agapibeassignment.infrastructure.config.KafkaConfig;
 import org.example.agapibeassignment.rest.response.FlashSaleItemResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,19 +30,19 @@ public class FlashSaleServiceImpl implements FlashSaleService {
     private final ProductRepository productRepo;
     private final UserRepository userRepo;
     private final RedisTemplate<String, Object> redis;
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     public FlashSaleServiceImpl(FlashSaleSlotRepository slotRepo, FlashSaleItemRepository itemRepo,
                                 FlashSaleOrderRepository orderRepo, ProductRepository productRepo,
                                 UserRepository userRepo, RedisTemplate<String, Object> redis,
-                                KafkaTemplate<String, String> kafkaTemplate) {
+                                ApplicationEventPublisher eventPublisher) {
         this.slotRepo = slotRepo;
         this.itemRepo = itemRepo;
         this.orderRepo = orderRepo;
         this.productRepo = productRepo;
         this.userRepo = userRepo;
         this.redis = redis;
-        this.kafkaTemplate = kafkaTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -83,13 +83,27 @@ public class FlashSaleServiceImpl implements FlashSaleService {
         }).toList();
     }
 
+    /**
+     * Purchase flow — Saga pattern with eventual consistency:
+     *
+     * SYNC (fast, returns immediately):
+     *   1. Redis DECR        — fast gate
+     *   2. DB sold_quantity   — atomic increment
+     *   3. DB balance         — atomic deduction
+     *   4. DB order           — status = PENDING
+     *   5. Spring Event       → Kafka AFTER_COMMIT
+     *
+     * ASYNC (Kafka consumer):
+     *   6a. SUCCESS → deduct warehouse stock → order = SUCCESS
+     *   6b. FAILURE → compensate: restore balance, sold_qty, Redis, order = CANCELLED
+     */
     @Override
     @Transactional
     public String purchase(Long userId, Long itemId) {
         LocalDate today = LocalDate.now();
         LocalTime now = LocalTime.now();
 
-        // 1. Check: user already purchased today?
+        // 1. Check: user already purchased today? (compensated orders are deleted, so simple check works)
         if (orderRepo.existsByUserIdAndSaleDate(userId, today))
             throw new BusinessException(ErrorCode.FLASH_SALE_ALREADY_PURCHASED);
 
@@ -107,45 +121,45 @@ public class FlashSaleServiceImpl implements FlashSaleService {
         String stockKey = STOCK_KEY + itemId;
         Long remaining = redis.opsForValue().decrement(stockKey);
         if (remaining == null || remaining < 0) {
-            // Rollback Redis
             redis.opsForValue().increment(stockKey);
             throw new BusinessException(ErrorCode.FLASH_SALE_SOLD_OUT);
         }
 
         try {
-            // 5. Atomic DB update: increment sold_quantity (returns 0 if oversold)
+            // 5. Atomic DB: increment sold_quantity
             int updated = itemRepo.incrementSoldQuantity(itemId);
             if (updated == 0) {
                 redis.opsForValue().increment(stockKey);
                 throw new BusinessException(ErrorCode.FLASH_SALE_SOLD_OUT);
             }
 
-            // 6. Atomic balance deduction (safe across multiple pods)
+            // 6. Atomic DB: deduct user balance
             int balanceUpdated = userRepo.deductBalance(userId, item.getFlashPrice());
             if (balanceUpdated == 0) {
                 redis.opsForValue().increment(stockKey);
                 throw new BusinessException(ErrorCode.FLASH_SALE_INSUFFICIENT_BALANCE);
             }
 
-            // 8. Create order
+            // 7. Create order with PENDING status (confirmed async by Kafka consumer)
             String orderNo = UUID.randomUUID().toString();
             FlashSaleOrder order = FlashSaleOrder.builder()
                     .orderNo(orderNo).userId(userId).flashSaleItemId(itemId)
-                    .saleDate(today).amount(item.getFlashPrice()).status("SUCCESS").build();
+                    .saleDate(today).amount(item.getFlashPrice()).status("PENDING").build();
             orderRepo.save(order);
 
-            // 9. Publish Kafka event for inventory sync
-            String event = String.format("{\"eventId\":\"%s\",\"type\":\"STOCK_DEDUCTED\",\"productId\":%d,\"quantity\":1}",
-                    UUID.randomUUID(), item.getProductId());
-            kafkaTemplate.send(KafkaConfig.TOPIC_INVENTORY_SYNC, String.valueOf(item.getProductId()), event);
+            // 8. Publish event → Kafka message sent AFTER_COMMIT with full saga context
+            eventPublisher.publishEvent(new InventoryDeductionEvent(
+                    item.getProductId(), 1,
+                    itemId, userId, item.getFlashPrice(), orderNo));
 
-            log.info("Purchase success: userId={}, itemId={}, orderNo={}", userId, itemId, orderNo);
+            log.info("Purchase initiated: userId={}, itemId={}, orderNo={}, status=PENDING",
+                    userId, itemId, orderNo);
             return orderNo;
 
         } catch (BusinessException e) {
-            throw e; // re-throw business exceptions (Redis already rolled back)
+            throw e;
         } catch (Exception e) {
-            redis.opsForValue().increment(stockKey); // rollback Redis on unexpected error
+            redis.opsForValue().increment(stockKey);
             log.error("Purchase failed unexpectedly", e);
             throw e;
         }

@@ -23,4 +23,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Modifying
     @Query("UPDATE Product p SET p.totalStock = p.totalStock + :quantity WHERE p.id = :productId")
     int restoreStock(Long productId, int quantity);
+
+    /**
+     * Strict atomic stock deduction — FAILS if stock insufficient.
+     * Used in purchase flow where we need strong consistency.
+     * Returns 1 if deducted successfully, 0 if stock insufficient or product not found.
+     */
+    @Modifying
+    @Query("UPDATE Product p SET p.totalStock = p.totalStock - :quantity WHERE p.id = :productId AND p.totalStock >= :quantity")
+    int deductStockStrict(Long productId, int quantity);
 }

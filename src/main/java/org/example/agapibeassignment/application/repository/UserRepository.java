@@ -20,5 +20,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Modifying
     @Query("UPDATE User u SET u.balance = u.balance - :amount WHERE u.id = :userId AND u.balance >= :amount")
     int deductBalance(Long userId, BigDecimal amount);
+
+    /**
+     * Atomic balance restoration — compensating transaction for saga rollback.
+     */
+    @Modifying
+    @Query("UPDATE User u SET u.balance = u.balance + :amount WHERE u.id = :userId")
+    int restoreBalance(Long userId, BigDecimal amount);
 }
 

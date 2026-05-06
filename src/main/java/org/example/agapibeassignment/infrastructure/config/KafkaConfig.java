@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
@@ -17,12 +18,17 @@ public class KafkaConfig {
     private static final Logger log = LoggerFactory.getLogger(KafkaConfig.class);
 
     public static final String TOPIC_INVENTORY_SYNC = "flashsale.inventory.sync";
-    public static final String TOPIC_INVENTORY_DLT  = "flashsale.inventory.sync.dlt";
+    public static final String TOPIC_INVENTORY_DLT = "flashsale.inventory.sync.dlt";
 
     @Bean
-    public NewTopic inventorySyncTopic() { return TopicBuilder.name(TOPIC_INVENTORY_SYNC).partitions(3).replicas(1).build(); }
+    public NewTopic inventorySyncTopic() {
+        return TopicBuilder.name(TOPIC_INVENTORY_SYNC).partitions(3).replicas(1).build();
+    }
+
     @Bean
-    public NewTopic inventoryDltTopic() { return TopicBuilder.name(TOPIC_INVENTORY_DLT).partitions(1).replicas(1).build(); }
+    public NewTopic inventoryDltTopic() {
+        return TopicBuilder.name(TOPIC_INVENTORY_DLT).partitions(1).replicas(1).build();
+    }
 
     /**
      * Error handler with retry + Dead Letter Topic routing.
@@ -43,8 +49,7 @@ public class KafkaConfig {
 
         // Don't retry on these non-transient exceptions
         errorHandler.addNotRetryableExceptions(
-                com.fasterxml.jackson.core.JsonProcessingException.class
-        );
+                com.fasterxml.jackson.core.JsonProcessingException.class);
 
         return errorHandler;
     }

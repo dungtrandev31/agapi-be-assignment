@@ -43,6 +43,18 @@ public class FlashSaleAdminServiceImpl implements FlashSaleAdminService {
     @Override
     @Transactional
     public FlashSaleSlot createSlot(CreateSlotRequest req) {
+        // Validate: end time must be after start time
+        if (!req.getEndTime().isAfter(req.getStartTime())) {
+            throw new BusinessException(ErrorCode.FLASH_SALE_INVALID_SLOT_TIME);
+        }
+
+        // Validate: no overlapping slot on the same date
+        if (slotRepo.existsOverlappingSlot(req.getSaleDate(), req.getStartTime(), req.getEndTime())) {
+            throw new BusinessException(ErrorCode.FLASH_SALE_SLOT_OVERLAP,
+                    String.format("Slot overlaps on %s between %s-%s",
+                            req.getSaleDate(), req.getStartTime(), req.getEndTime()));
+        }
+
         FlashSaleSlot slot = FlashSaleSlot.builder()
                 .saleDate(req.getSaleDate()).startTime(req.getStartTime()).endTime(req.getEndTime()).build();
         slot = slotRepo.save(slot);
@@ -56,6 +68,19 @@ public class FlashSaleAdminServiceImpl implements FlashSaleAdminService {
     public FlashSaleSlot updateSlot(Long slotId, CreateSlotRequest req) {
         FlashSaleSlot slot = slotRepo.findById(slotId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FLASH_SALE_SLOT_NOT_FOUND));
+
+        // Validate: end time must be after start time
+        if (!req.getEndTime().isAfter(req.getStartTime())) {
+            throw new BusinessException(ErrorCode.FLASH_SALE_INVALID_SLOT_TIME);
+        }
+
+        // Validate: no overlapping slot (excluding this one)
+        if (slotRepo.existsOverlappingSlotExcluding(req.getSaleDate(), req.getStartTime(), req.getEndTime(), slotId)) {
+            throw new BusinessException(ErrorCode.FLASH_SALE_SLOT_OVERLAP,
+                    String.format("Slot overlaps on %s between %s-%s",
+                            req.getSaleDate(), req.getStartTime(), req.getEndTime()));
+        }
+
         slot.setSaleDate(req.getSaleDate());
         slot.setStartTime(req.getStartTime());
         slot.setEndTime(req.getEndTime());
@@ -86,6 +111,12 @@ public class FlashSaleAdminServiceImpl implements FlashSaleAdminService {
         Product product = productRepo.findById(req.getProductId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
                         "Product not found: " + req.getProductId()));
+
+        // Validate: product not already in this slot
+        if (itemRepo.existsBySlotIdAndProductId(slotId, req.getProductId())) {
+            throw new BusinessException(ErrorCode.FLASH_SALE_DUPLICATE_PRODUCT,
+                    String.format("Product %d already exists in slot %d", req.getProductId(), slotId));
+        }
 
         // Validate: total committed sale qty across ALL slots must not exceed warehouse
         // stock
@@ -131,14 +162,14 @@ public class FlashSaleAdminServiceImpl implements FlashSaleAdminService {
 
         item.setSaleQuantity(req.getSaleQuantity());
         item.setFlashPrice(req.getFlashPrice());
-        item = itemRepo.save(item);
+        FlashSaleItem savedItem = itemRepo.save(item);
 
         // Update Redis stock (remaining = new sale qty - sold qty)
-        int remaining = item.getSaleQuantity() - item.getSoldQuantity();
-        redis.opsForValue().set(STOCK_KEY + item.getId(), Math.max(0, remaining));
+        int remaining = savedItem.getSaleQuantity() - savedItem.getSoldQuantity();
+        redis.opsForValue().set(STOCK_KEY + savedItem.getId(), Math.max(0, remaining));
         log.info("Item updated: id={}, newQty={}, newPrice={}, availableStock={}",
                 itemId, req.getSaleQuantity(), req.getFlashPrice(), availableForSale);
-        return item;
+        return savedItem;
     }
 
     @Override

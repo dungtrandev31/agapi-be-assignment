@@ -12,9 +12,22 @@ public interface FlashSaleItemRepository extends JpaRepository<FlashSaleItem, Lo
 
     List<FlashSaleItem> findBySlotId(Long slotId);
 
+    /**
+     * Check if a product already exists in a slot (prevent duplicates).
+     */
+    boolean existsBySlotIdAndProductId(Long slotId, Long productId);
+
     @Modifying
     @Query("UPDATE FlashSaleItem i SET i.soldQuantity = i.soldQuantity + 1 WHERE i.id = :id AND i.soldQuantity < i.saleQuantity")
     int incrementSoldQuantity(Long id);
+
+    /**
+     * Compensating transaction: decrement sold_quantity when saga rollback.
+     * Only decrements if soldQuantity > 0 to prevent negative values.
+     */
+    @Modifying
+    @Query("UPDATE FlashSaleItem i SET i.soldQuantity = i.soldQuantity - 1 WHERE i.id = :id AND i.soldQuantity > 0")
+    int decrementSoldQuantity(Long id);
 
     /**
      * Sum total saleQuantity for a product across all flash sale items,

@@ -32,6 +32,9 @@ docker compose up -d
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | Kafka UI | http://localhost:8081 |
 
+### 🚀 Postman Collection
+Import file [`agapi_assignment.postman_collection.json`](agapi_assignment.postman_collection.json) vào Postman để thử nghiệm nhanh các API (đã bao gồm các request đăng ký, đăng nhập và mua hàng).
+
 > **Seeded accounts:** Admin `admin@flashsale.com` / `admin123` · 8 sample products pre-loaded.
 
 ---
@@ -87,23 +90,62 @@ Static fallback images:
 
 ---
 
-## Concurrency & Multi-Pod Safety
+## Purchase Flow (Saga Pattern)
+
+📐 **Interactive sequence diagrams →** [`docs/diagrams.html`](docs/diagrams.html)
+
+API trả về **ngay lập tức** (order PENDING). Kafka consumer xử lý async: trừ kho thành công → confirm, thất bại → **rollback toàn bộ**.
+
+### Sync (fast, ~10ms) — trả về ngay cho client
 
 ```
-Redis DECR (atomic)          → Fast stock gate, shared across all pods
+1. Redis DECR flash_sale_stock:{itemId}    → fast gate, loại request hết hàng
+2. DB: sold_quantity +1                     → WHERE sold < max (atomic)
+3. DB: balance -= amount                    → WHERE balance >= amount (atomic)
+4. DB: INSERT order (status = PENDING)      → Kafka confirm
+5. Return 200 {orderNo, status: PENDING}
+6. Kafka: STOCK_DEDUCTED event              → gửi AFTER_COMMIT (no ghost events)
+```
+
+### Async — Kafka Consumer (any pod)
+
+**✅ Success** (warehouse stock đủ):
+```
+1. DB: totalStock -1 (WHERE stock >= 1)     → rows = 1 → OK
+2. DB: UPDATE order status = SUCCESS        → confirm order
+3. DB: INSERT inventory_event (PROCESSED)   → audit trail
+```
+
+**🔄 Compensation** (stock hết / DB timeout / lỗi bất kỳ):
+```
+1. DB: DELETE order                         → xoá order, giải phóng unique(user_id, sale_date)
+2. DB: balance += amount                    → hoàn tiền
+3. DB: sold_quantity -1                     → trả lại slot
+4. Redis: INCR flash_sale_stock:{itemId}    → trả lại stock cho người khác
+5. DB: INSERT inventory_event (COMPENSATED) → audit trail
+→ User có thể mua lại
+```
+
+### Multi-Pod Safety
+
+```
+Redis DECR/INCR (atomic)     → Fast stock gate, shared across all pods
 DB WHERE sold < max          → Atomic increment, prevents overselling
 DB WHERE balance >= amount   → Atomic deduction, prevents negative balance
-DB UNIQUE (user, date)       → One purchase per user per day
-Redis INCR rollback          → Restore stock if DB step fails
+DB WHERE stock >= quantity   → Atomic warehouse check, prevents overselling
+DB UNIQUE (user_id, date)   → One purchase per user per day (order deleted on compensation)
+Kafka consumer idempotent    → eventId unique constraint + status tracking
+Saga compensation            → All atomic DB queries, no in-memory state
 ```
 
 All operations are **lock-free** — no distributed locks needed. Safe for horizontal scaling.
 
 ## Kafka Inventory Sync
 
-- **Producer:** Purchase success → publish `STOCK_DEDUCTED` event
-- **Consumer:** Idempotent (check `eventId` unique) → update `product.totalStock`
-- **DLT:** Failed events routed to Dead Letter Topic for retry
+- **Producer:** `@TransactionalEventListener(AFTER_COMMIT)` — message chỉ gửi sau khi DB commit (no ghost events)
+- **Consumer:** Saga orchestrator — deduct stock hoặc compensate toàn bộ purchase
+- **Retry:** 3 lần, cách 1 giây. Hết retry → Dead Letter Topic
+- **Idempotent:** Event status tracking (`PROCESSED` / `COMPENSATED`) ngăn xử lý trùng
 
 ## Security
 
@@ -118,10 +160,12 @@ All operations are **lock-free** — no distributed locks needed. Safe for horiz
 | Decision | Rationale |
 |---|---|
 | No foreign keys | App-level integrity — avoids cascade issues, easier to scale |
+| Saga pattern | Fast response (PENDING) + async warehouse sync + compensation on failure |
 | User balance seeded | Demo: 10.000.000₫ on registration |
 | OTP mock | Logged to console, stored in Redis (TTL 5min) |
 | Stateless JWT | Multi-instance ready — no sticky sessions |
 | Atomic WHERE clauses | DB-level safety without distributed locks |
+| Kafka AFTER_COMMIT | No ghost events — message only sent after DB commits |
 
 ## Load Testing
 
