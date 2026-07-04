@@ -13,10 +13,11 @@ spec:
     metadata:
       labels:
         app: crm-backend
-      # [FIX LỖI 1]: Thêm Annotation để bật AppArmor cho container 'java-app'
+      # Khai báo Annotation để bật AppArmor cho container
       annotations:
         container.apparmor.security.beta.kubernetes.io/java-app: runtime/default
     spec:
+      # Security Context ở cấp độ Pod
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -26,21 +27,22 @@ spec:
           type: RuntimeDefault
       containers:
         - name: java-app
+          # Image sử dụng phiên bản cụ thể kèm mã băm SHA256 (Digest)
           image: vtb-crm/backend:1.0.0@sha256:1fffb95fd064f53c997da5bb9b2fdb9b14abcad7391fbb7fe42b866358695b16
           ports:
             - containerPort: 8080
+          # Security Context ở cấp độ Container
           securityContext:
-            # [FIX LỖI 3]: Khai báo cấm chạy root trực tiếp ở cấp độ Container
             runAsNonRoot: true
             runAsUser: 10001
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            # [FIX LỖI 2]: Khai báo bật seccomp profile trực tiếp ở cấp độ Container
             seccompProfile:
               type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
+          # Giới hạn tài nguyên (Tránh cạn kiệt tài nguyên node)
           resources:
             requests:
               cpu: "100m"
@@ -48,12 +50,14 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          # Kiểm tra trạng thái sống (Liveness)
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20
+          # Kiểm tra trạng thái sẵn sàng phục vụ (Readiness)
           readinessProbe:
             httpGet:
               path: /actuator/health
