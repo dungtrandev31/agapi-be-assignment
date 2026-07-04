@@ -2,16 +2,57 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: crm-backend-java
+  labels:
+    app: crm-backend
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: crm-backend
   template:
+    metadata:
+      labels:
+        app: crm-backend
     spec:
+      # Áp dụng Security Context ở cấp độ Pod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: java-app
-          image: vtb-crm/backend:latest
+          # Sửa lỗi Image: Dùng tag cụ thể và kèm theo mã Digest SHA256 giả định
+          image: vtb-crm/backend:1.0.0@sha256:1fffb95fd064f53c997da5bb9b2fdb9b14abcad7391fbb7fe42b866358695b16
+          ports:
+            - containerPort: 8080
+          # Áp dụng Security Context ở cấp độ Container
           securityContext:
-            # Cố tình set quyền cao nhất để kích hoạt Hard Gate của Terrascan
-            privileged: true
-            runAsUser: 0
-
-  selector:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # Cấu hình giới hạn tài nguyên
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # Cấu hình kiểm tra sức khỏe ứng dụng
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
