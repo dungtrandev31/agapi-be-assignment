@@ -13,8 +13,10 @@ spec:
     metadata:
       labels:
         app: crm-backend
+      # [FIX LỖI 1]: Thêm Annotation để bật AppArmor cho container 'java-app'
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/java-app: runtime/default
     spec:
-      # Áp dụng Security Context ở cấp độ Pod
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -24,18 +26,21 @@ spec:
           type: RuntimeDefault
       containers:
         - name: java-app
-          # Sửa lỗi Image: Dùng tag cụ thể và kèm theo mã Digest SHA256 giả định
           image: vtb-crm/backend:1.0.0@sha256:1fffb95fd064f53c997da5bb9b2fdb9b14abcad7391fbb7fe42b866358695b16
           ports:
             - containerPort: 8080
-          # Áp dụng Security Context ở cấp độ Container
           securityContext:
+            # [FIX LỖI 3]: Khai báo cấm chạy root trực tiếp ở cấp độ Container
+            runAsNonRoot: true
+            runAsUser: 10001
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            # [FIX LỖI 2]: Khai báo bật seccomp profile trực tiếp ở cấp độ Container
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
-          # Cấu hình giới hạn tài nguyên
           resources:
             requests:
               cpu: "100m"
@@ -43,7 +48,6 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-          # Cấu hình kiểm tra sức khỏe ứng dụng
           livenessProbe:
             httpGet:
               path: /actuator/health
